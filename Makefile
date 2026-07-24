@@ -25,12 +25,38 @@ build: generate ## Build the binary into bin/rendezvous (regenerates the fronten
 run: generate ## Run the server locally with stub auth (DB_DSN=data/rendezvous.db, use ARGS="--flag=value" for extra flags)
 	AUTH_STUB=true DB_DSN="data/rendezvous.db" go run $(CMD_DIR) $(ARGS)
 
-.PHONY: generate frontend
-generate: ## Generate the frontend bundle (go generate -> esbuild)
+FRONTEND_VENDOR_DIR := internal/frontend/static/js/vendor
+
+.PHONY: generate frontend vendor-frontend-js
+generate: vendor-frontend-js ## Generate the frontend bundle (go generate -> esbuild) and vendor pinned JS deps
 	@command -v esbuild >/dev/null || (echo "esbuild not found. Install: 'brew install esbuild' or 'npm i -g esbuild'"; exit 1)
 	go generate ./internal/frontend/...
 
 frontend: generate ## Alias for generate
+
+vendor-frontend-js: $(FRONTEND_VENDOR_DIR)/react.production.min.js $(FRONTEND_VENDOR_DIR)/react-dom.production.min.js $(FRONTEND_VENDOR_DIR)/marked.min.js $(FRONTEND_VENDOR_DIR)/purify.min.js ## Download & checksum-verify pinned JS deps (react, react-dom, marked, dompurify), served from our own origin instead of unpkg.com
+
+$(FRONTEND_VENDOR_DIR)/react.production.min.js: URL := https://unpkg.com/react@18.3.1/umd/react.production.min.js
+$(FRONTEND_VENDOR_DIR)/react.production.min.js: SHA256 := d949f1c3687aedadcedac85261865f29b17cd273997e7f6b2bfc53b2f9d4c4dd
+$(FRONTEND_VENDOR_DIR)/react-dom.production.min.js: URL := https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js
+$(FRONTEND_VENDOR_DIR)/react-dom.production.min.js: SHA256 := 35f4f974f4b2bcd44da73963347f8952e341f83909e4498227d4e26b98f66f0d
+$(FRONTEND_VENDOR_DIR)/marked.min.js: URL := https://unpkg.com/marked@13.0.3/marked.min.js
+$(FRONTEND_VENDOR_DIR)/marked.min.js: SHA256 := 5adea7d8ee41a700fccc14bb9d503104f0470cc17a84ad3e167d3f5251eae0da
+$(FRONTEND_VENDOR_DIR)/purify.min.js: URL := https://unpkg.com/dompurify@3.4.12/dist/purify.min.js
+$(FRONTEND_VENDOR_DIR)/purify.min.js: SHA256 := c45ba939765574f96cbf35ee9b6d89f73756a17921814425e74b82f7c54603ce
+
+# Fetches URL to $@ and hard-fails the build on a checksum mismatch,
+# rather than baking a substituted (e.g. CDN-hijacked) response into the
+# image — this is the integrity guarantee that used to live in <script
+# integrity="..."> tags, now enforced once at build time instead of on
+# every page load.
+$(FRONTEND_VENDOR_DIR)/%.js:
+	@mkdir -p $(FRONTEND_VENDOR_DIR)
+	curl -fsSL -o $@ $(URL)
+	@actual=$$(openssl dgst -sha256 $@ | awk '{print $$NF}'); \
+	if [ "$$actual" != "$(SHA256)" ]; then \
+		echo "checksum mismatch for $@: expected $(SHA256), got $$actual"; rm -f $@; exit 1; \
+	fi
 
 .PHONY: test
 test: generate ## Run all tests (regenerates the frontend bundle first)
@@ -70,3 +96,4 @@ security: gosec govulncheck staticcheck ## Run all security and static-analysis 
 clean: ## Remove build artifacts
 	rm -rf $(BIN_DIR)
 	rm -f internal/frontend/static/js/app.bundle.js
+	rm -rf $(FRONTEND_VENDOR_DIR)

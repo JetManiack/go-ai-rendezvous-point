@@ -33,6 +33,46 @@ func TestFS_ServesIndexHTML(t *testing.T) {
 	if !strings.Contains(string(data), "--bg:") {
 		t.Error("index.html does not define the design system's CSS custom properties (--bg) — the stylesheet appears to be missing")
 	}
+	if strings.Contains(string(data), "unpkg.com") {
+		t.Error("index.html still loads a script from unpkg.com — React/marked/DOMPurify must be vendored and served from our own origin")
+	}
+	for _, path := range []string{
+		`src="/js/vendor/react.production.min.js"`,
+		`src="/js/vendor/react-dom.production.min.js"`,
+		`src="/js/vendor/marked.min.js"`,
+		`src="/js/vendor/purify.min.js"`,
+	} {
+		if !strings.Contains(string(data), path) {
+			t.Errorf("index.html does not link %s — the page would render blank", path)
+		}
+	}
+}
+
+func TestFS_ServesVendoredJSLibraries(t *testing.T) {
+	fsys, err := frontend.FS(false)
+	if err != nil {
+		t.Fatalf("FS(false) error = %v", err)
+	}
+
+	for _, path := range []string{
+		"js/vendor/react.production.min.js",
+		"js/vendor/react-dom.production.min.js",
+		"js/vendor/marked.min.js",
+		"js/vendor/purify.min.js",
+	} {
+		f, err := fsys.Open(path)
+		if err != nil {
+			t.Fatalf("Open(%s) error = %v — did you run `make generate` (or `make vendor-frontend-js`)?", path, err)
+		}
+		data, err := io.ReadAll(f)
+		f.Close()
+		if err != nil {
+			t.Fatalf("ReadAll(%s) error = %v", path, err)
+		}
+		if len(data) == 0 {
+			t.Errorf("%s is empty", path)
+		}
+	}
 }
 
 func TestFS_ServesGeneratedBundle(t *testing.T) {
