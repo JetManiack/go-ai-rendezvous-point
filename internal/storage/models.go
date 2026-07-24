@@ -36,14 +36,23 @@ type Thread struct {
 	AuthorID  string    `gorm:"type:char(36);not null;index" json:"author_id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// MentionReport is populated by CreateThread for the caller's own use
+	// (e.g. surfacing resolved/unresolved @handles in a tool response). It
+	// is never persisted or serialized as part of the Thread itself.
+	MentionReport MentionReport `gorm:"-" json:"-"`
 }
 
 type Reply struct {
-	ID        string `gorm:"type:char(36);primaryKey" json:"id"`
-	ThreadID  string `gorm:"type:char(36);not null;index" json:"thread_id"`
-	Body      string `gorm:"not null" json:"body"`
-	AuthorID  string `gorm:"type:char(36);not null;index" json:"author_id"`
+	ID        string    `gorm:"type:char(36);primaryKey" json:"id"`
+	ThreadID  string    `gorm:"type:char(36);not null;index" json:"thread_id"`
+	Body      string    `gorm:"not null" json:"body"`
+	AuthorID  string    `gorm:"type:char(36);not null;index" json:"author_id"`
 	CreatedAt time.Time `json:"created_at"`
+
+	// MentionReport is populated by AddReply for the caller's own use (see
+	// Thread.MentionReport). Never persisted or serialized.
+	MentionReport MentionReport `gorm:"-" json:"-"`
 }
 
 type Watcher struct {
@@ -60,11 +69,11 @@ type ThreadWatch struct {
 }
 
 type Mention struct {
-	ID               string `gorm:"type:char(36);primaryKey" json:"id"`
-	ReplyID          *string `gorm:"type:char(36);index" json:"reply_id,omitempty"`
-	ThreadID         *string `gorm:"type:char(36);index" json:"thread_id,omitempty"`
-	MentionedActorID string `gorm:"type:char(36);not null;index" json:"mentioned_actor_id"`
-	CreatedAt        time.Time `json:"created_at"`
+	ID               string     `gorm:"type:char(36);primaryKey" json:"id"`
+	ReplyID          *string    `gorm:"type:char(36);index" json:"reply_id,omitempty"`
+	ThreadID         *string    `gorm:"type:char(36);index" json:"thread_id,omitempty"`
+	MentionedActorID string     `gorm:"type:char(36);not null;index" json:"mentioned_actor_id"`
+	CreatedAt        time.Time  `json:"created_at"`
 	SeenAt           *time.Time `json:"seen_at,omitempty"`
 }
 
@@ -112,10 +121,10 @@ type Session struct {
 // onboarded yet — Actor itself stays a minimal identity row, matching
 // AgentCredential/UserIdentity for kind-specific or optional data.
 type ActorProfile struct {
-	ActorID   string `gorm:"type:char(36);primaryKey" json:"actor_id"`
-	Name      string `gorm:"not null" json:"name"`
-	Nickname  string `gorm:"not null;uniqueIndex" json:"nickname"`
-	Bio       string `json:"bio"`
+	ActorID   string    `gorm:"type:char(36);primaryKey" json:"actor_id"`
+	Name      string    `gorm:"not null" json:"name"`
+	Nickname  string    `gorm:"not null;uniqueIndex" json:"nickname"`
+	Bio       string    `json:"bio"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 

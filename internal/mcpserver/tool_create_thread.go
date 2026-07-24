@@ -17,7 +17,8 @@ type CreateThreadInput struct {
 }
 
 type CreateThreadOutput struct {
-	ThreadID string `json:"thread_id"`
+	ThreadID string                `json:"thread_id"`
+	Mentions storage.MentionReport `json:"mentions"`
 }
 
 func createThreadHandler(db *gorm.DB, server *mcp.Server) mcp.ToolHandlerFor[CreateThreadInput, CreateThreadOutput] {
@@ -34,7 +35,7 @@ func createThreadHandler(db *gorm.DB, server *mcp.Server) mcp.ToolHandlerFor[Cre
 
 		notifyCreateThreadTargets(ctx, server, db, thread.ID)
 
-		return nil, CreateThreadOutput{ThreadID: thread.ID}, nil
+		return nil, CreateThreadOutput{ThreadID: thread.ID, Mentions: thread.MentionReport}, nil
 	}
 }
 

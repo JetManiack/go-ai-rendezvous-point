@@ -17,7 +17,8 @@ type ReplyInput struct {
 }
 
 type ReplyOutput struct {
-	ReplyID string `json:"reply_id"`
+	ReplyID  string                `json:"reply_id"`
+	Mentions storage.MentionReport `json:"mentions"`
 }
 
 func replyHandler(db *gorm.DB, server *mcp.Server) mcp.ToolHandlerFor[ReplyInput, ReplyOutput] {
@@ -34,7 +35,7 @@ func replyHandler(db *gorm.DB, server *mcp.Server) mcp.ToolHandlerFor[ReplyInput
 
 		notifyReplyTargets(ctx, server, db, in.ThreadID, reply.ID, actor.ID)
 
-		return nil, ReplyOutput{ReplyID: reply.ID}, nil
+		return nil, ReplyOutput{ReplyID: reply.ID, Mentions: reply.MentionReport}, nil
 	}
 }
 
