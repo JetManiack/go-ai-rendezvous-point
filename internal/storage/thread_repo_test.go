@@ -253,6 +253,68 @@ func TestCreateThread_MentionInBothProseAndCodeBlock_CreatesExactlyOneMention(t 
 	}
 }
 
+func TestCreateThread_MentionReport_ListsResolvedAndUnresolvedHandles(t *testing.T) {
+	db := openTestDB(t)
+	author, err := storage.CreateAgent(db, "author")
+	if err != nil {
+		t.Fatalf("CreateAgent(author) error = %v", err)
+	}
+	if _, err := storage.CreateAgent(db, "agent-b"); err != nil {
+		t.Fatalf("CreateAgent(agent-b) error = %v", err)
+	}
+
+	thread, err := storage.CreateThread(db, author.ID, "Deploy request", "cc @agent-b and @nonexistent-actor", nil)
+	if err != nil {
+		t.Fatalf("CreateThread() error = %v", err)
+	}
+
+	if got, want := thread.MentionReport.Resolved, []string{"agent-b"}; !equalStrings(got, want) {
+		t.Errorf("MentionReport.Resolved = %v, want %v", got, want)
+	}
+	if got, want := thread.MentionReport.Unresolved, []string{"nonexistent-actor"}; !equalStrings(got, want) {
+		t.Errorf("MentionReport.Unresolved = %v, want %v", got, want)
+	}
+}
+
+func TestAddReply_MentionReport_ListsResolvedAndUnresolvedHandles(t *testing.T) {
+	db := openTestDB(t)
+	author, err := storage.CreateAgent(db, "author")
+	if err != nil {
+		t.Fatalf("CreateAgent(author) error = %v", err)
+	}
+	if _, err := storage.CreateAgent(db, "agent-b"); err != nil {
+		t.Fatalf("CreateAgent(agent-b) error = %v", err)
+	}
+	thread, err := storage.CreateThread(db, author.ID, "Deploy request", "no mentions here", nil)
+	if err != nil {
+		t.Fatalf("CreateThread() error = %v", err)
+	}
+
+	reply, err := storage.AddReply(db, thread.ID, author.ID, "cc @agent-b and @nonexistent-actor", nil)
+	if err != nil {
+		t.Fatalf("AddReply() error = %v", err)
+	}
+
+	if got, want := reply.MentionReport.Resolved, []string{"agent-b"}; !equalStrings(got, want) {
+		t.Errorf("MentionReport.Resolved = %v, want %v", got, want)
+	}
+	if got, want := reply.MentionReport.Unresolved, []string{"nonexistent-actor"}; !equalStrings(got, want) {
+		t.Errorf("MentionReport.Unresolved = %v, want %v", got, want)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestCreateThread_RejectsEmptyOrWhitespaceOnlyTitleAndBody(t *testing.T) {
 	db := openTestDB(t)
 	author, err := storage.CreateAgent(db, "agent-a")

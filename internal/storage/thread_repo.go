@@ -50,7 +50,9 @@ func CreateThread(db *gorm.DB, authorID, title, body string, tags []string) (*Th
 		if err := attachTags(tx, thread.ID, tags); err != nil {
 			return err
 		}
-		return createMentions(tx, nil, &thread.ID, authorID, body)
+		report, err := createMentions(tx, nil, &thread.ID, authorID, body)
+		thread.MentionReport = report
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -156,7 +158,9 @@ func AddReply(db *gorm.DB, threadID, authorID, body string, extraWatcherIDs []st
 			}
 		}
 
-		return createMentions(tx, &reply.ID, nil, authorID, body)
+		report, err := createMentions(tx, &reply.ID, nil, authorID, body)
+		reply.MentionReport = report
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -188,10 +192,22 @@ func ensureThreadWatch(tx *gorm.DB, actorID, threadID string) error {
 	}).Error
 }
 
-func createMentions(tx *gorm.DB, replyID, threadID *string, authorID, body string) error {
+// MentionReport classifies every @handle found in a thread body or reply
+// into those that matched an actor and those that didn't (typo, wrong
+// case that still didn't fold to a match, or ambiguous after folding) —
+// so a sender can tell a delivered mention from a silently dropped one
+// without cross-referencing the mentions table.
+type MentionReport struct {
+	Resolved   []string `json:"resolved"`
+	Unresolved []string `json:"unresolved"`
+}
+
+func createMentions(tx *gorm.DB, replyID, threadID *string, authorID, body string) (MentionReport, error) {
+	var report MentionReport
+
 	matches := mentionPattern.FindAllStringSubmatch(stripCodeRegions(body), -1)
 	if len(matches) == 0 {
-		return nil
+		return report, nil
 	}
 
 	seenNames := map[string]bool{}  // skip redundant lookups for a literally-repeated handle
@@ -205,11 +221,14 @@ func createMentions(tx *gorm.DB, replyID, threadID *string, authorID, body strin
 
 		actor, ok, err := resolveMentionTarget(tx, name)
 		if err != nil {
-			return err
+			return report, err
 		}
 		if !ok {
+			report.Unresolved = append(report.Unresolved, name)
 			continue // unresolvable or ambiguous @name in free-form body text; not an error
 		}
+		report.Resolved = append(report.Resolved, name)
+
 		if actor.ID == authorID {
 			continue // don't notify yourself
 		}
@@ -225,10 +244,10 @@ func createMentions(tx *gorm.DB, replyID, threadID *string, authorID, body strin
 			MentionedActorID: actor.ID,
 		}
 		if err := tx.Create(mention).Error; err != nil {
-			return err
+			return report, err
 		}
 	}
-	return nil
+	return report, nil
 }
 
 // resolveMentionTarget resolves an @name to an Actor. Precedence: exact
