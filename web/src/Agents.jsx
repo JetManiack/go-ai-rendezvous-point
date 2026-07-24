@@ -86,7 +86,9 @@ export default function Agents({ role }) {
               <div className="agent-card" key={agent.id}>
                 <div className="beacon-row">
                   <span className={"beacon" + (agent.has_active_token ? " active" : "")}></span>
-                  <span className="name">{agent.display_name}</span>
+                  <a className="name" href={"#/profiles/" + agent.id}>
+                    {agent.display_name}
+                  </a>
                   <span className={"status-label" + (agent.has_active_token ? " active" : "")}>
                     {agent.has_active_token ? "signaling" : "revoked"}
                   </span>
