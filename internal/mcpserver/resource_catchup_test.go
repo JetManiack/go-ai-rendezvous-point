@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"gorm.io/gorm"
@@ -51,6 +52,49 @@ func newTestSessionWithResourceUpdates(t *testing.T, db *gorm.DB, token string) 
 		session.Close()
 		srv.Close()
 	}
+}
+
+// newSharedTestServer starts one httptest server for db's MCP handler and
+// returns its URL, closing it via t.Cleanup. Tests with multiple sessions
+// that must observe each other's push notifications (state that lives in
+// the *mcp.Server itself, not the database) must connect every session to
+// the SAME server — never call this once per session.
+func newSharedTestServer(t *testing.T, db *gorm.DB) string {
+	t.Helper()
+	srv := httptest.NewServer(mcpserver.NewHTTPHandler(db))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// connectResourceUpdateSession connects an MCP client (authenticated as
+// token) to serverURL — from newSharedTestServer, so multiple sessions can
+// share one *mcp.Server — and captures every "notifications/resources/updated"
+// URI the server sends, via a buffered channel.
+func connectResourceUpdateSession(t *testing.T, serverURL, token string) (*mcp.ClientSession, chan string, func()) {
+	t.Helper()
+
+	httpClient := &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			r.Header.Set("Authorization", "Bearer "+token)
+			return http.DefaultTransport.RoundTrip(r)
+		}),
+	}
+
+	updates := make(chan string, 16)
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.1"}, &mcp.ClientOptions{
+		ResourceUpdatedHandler: func(ctx context.Context, req *mcp.ResourceUpdatedNotificationRequest) {
+			updates <- req.Params.URI
+		},
+	})
+	session, err := client.Connect(context.Background(), &mcp.StreamableClientTransport{
+		Endpoint:   serverURL + "/mcp",
+		HTTPClient: httpClient,
+	}, nil)
+	if err != nil {
+		t.Fatalf("client.Connect() error = %v", err)
+	}
+
+	return session, updates, func() { session.Close() }
 }
 
 func TestCatchUpTool_IncludesActorID(t *testing.T) {
@@ -171,5 +215,124 @@ func TestReadOwnCatchUpResource_ReturnsSummaryWithoutMarkingSeen(t *testing.T) {
 	callTool(t, session, "catch_up", map[string]any{}, &out)
 	if len(out.NewMentions) != 1 {
 		t.Errorf("catch_up NewMentions after a resource read = %d, want 1 (resource read must be non-destructive)", len(out.NewMentions))
+	}
+}
+
+func TestAddReply_NotifiesWatcherButNotAuthor(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	agentA, err := storage.CreateAgent(db, "agent-a")
+	if err != nil {
+		t.Fatalf("CreateAgent(agent-a) error = %v", err)
+	}
+	agentB, err := storage.CreateAgent(db, "agent-b")
+	if err != nil {
+		t.Fatalf("CreateAgent(agent-b) error = %v", err)
+	}
+	tokenA, err := storage.IssueAgentToken(db, agentA.ID)
+	if err != nil {
+		t.Fatalf("IssueAgentToken(agent-a) error = %v", err)
+	}
+	tokenB, err := storage.IssueAgentToken(db, agentB.ID)
+	if err != nil {
+		t.Fatalf("IssueAgentToken(agent-b) error = %v", err)
+	}
+
+	serverURL := newSharedTestServer(t, db)
+	sessionA, updatesA, cleanupA := connectResourceUpdateSession(t, serverURL, tokenA)
+	defer cleanupA()
+	sessionB, updatesB, cleanupB := connectResourceUpdateSession(t, serverURL, tokenB)
+	defer cleanupB()
+
+	if err := sessionA.Subscribe(context.Background(), &mcp.SubscribeParams{URI: "rendezvous://catchup/" + agentA.ID}); err != nil {
+		t.Fatalf("agent-a Subscribe() error = %v", err)
+	}
+	if err := sessionB.Subscribe(context.Background(), &mcp.SubscribeParams{URI: "rendezvous://catchup/" + agentB.ID}); err != nil {
+		t.Fatalf("agent-b Subscribe() error = %v", err)
+	}
+
+	var created mcpserver.CreateThreadOutput
+	callTool(t, sessionA, "create_thread", map[string]any{
+		"title": "Deploy",
+		"body":  "Deploying now",
+	}, &created)
+
+	var watched mcpserver.WatchThreadOutput
+	callTool(t, sessionB, "watch_thread", map[string]any{
+		"thread_id": created.ThreadID,
+	}, &watched)
+
+	var replied mcpserver.ReplyOutput
+	callTool(t, sessionA, "reply", map[string]any{
+		"thread_id": created.ThreadID,
+		"body":      "Update: still going",
+	}, &replied)
+
+	select {
+	case uri := <-updatesB:
+		want := "rendezvous://catchup/" + agentB.ID
+		if uri != want {
+			t.Errorf("agent-b notified URI = %q, want %q", uri, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("agent-b (a watcher) was not notified of the new reply")
+	}
+
+	select {
+	case uri := <-updatesA:
+		t.Errorf("agent-a (the replier) was unexpectedly notified: %q", uri)
+	case <-time.After(200 * time.Millisecond):
+		// Expected: the author of its own reply gets no notification.
+	}
+}
+
+func TestCreateThread_NotifiesMentionedActor(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	agentA, err := storage.CreateAgent(db, "agent-a")
+	if err != nil {
+		t.Fatalf("CreateAgent(agent-a) error = %v", err)
+	}
+	agentB, err := storage.CreateAgent(db, "agent-b")
+	if err != nil {
+		t.Fatalf("CreateAgent(agent-b) error = %v", err)
+	}
+	tokenA, err := storage.IssueAgentToken(db, agentA.ID)
+	if err != nil {
+		t.Fatalf("IssueAgentToken(agent-a) error = %v", err)
+	}
+	tokenB, err := storage.IssueAgentToken(db, agentB.ID)
+	if err != nil {
+		t.Fatalf("IssueAgentToken(agent-b) error = %v", err)
+	}
+
+	serverURL := newSharedTestServer(t, db)
+	sessionA, _, cleanupA := connectResourceUpdateSession(t, serverURL, tokenA)
+	defer cleanupA()
+	sessionB, updatesB, cleanupB := connectResourceUpdateSession(t, serverURL, tokenB)
+	defer cleanupB()
+
+	if err := sessionB.Subscribe(context.Background(), &mcp.SubscribeParams{URI: "rendezvous://catchup/" + agentB.ID}); err != nil {
+		t.Fatalf("agent-b Subscribe() error = %v", err)
+	}
+
+	var created mcpserver.CreateThreadOutput
+	callTool(t, sessionA, "create_thread", map[string]any{
+		"title": "Deploy",
+		"body":  "Deploying now, cc @agent-b",
+	}, &created)
+
+	select {
+	case uri := <-updatesB:
+		want := "rendezvous://catchup/" + agentB.ID
+		if uri != want {
+			t.Errorf("agent-b notified URI = %q, want %q", uri, want)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("agent-b (mentioned in the thread body) was not notified")
 	}
 }

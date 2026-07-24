@@ -20,7 +20,7 @@ type CreateThreadOutput struct {
 	ThreadID string `json:"thread_id"`
 }
 
-func createThreadHandler(db *gorm.DB) mcp.ToolHandlerFor[CreateThreadInput, CreateThreadOutput] {
+func createThreadHandler(db *gorm.DB, server *mcp.Server) mcp.ToolHandlerFor[CreateThreadInput, CreateThreadOutput] {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in CreateThreadInput) (*mcp.CallToolResult, CreateThreadOutput, error) {
 		actor, ok := ActorFromContext(ctx)
 		if !ok {
@@ -32,6 +32,21 @@ func createThreadHandler(db *gorm.DB) mcp.ToolHandlerFor[CreateThreadInput, Crea
 			return nil, CreateThreadOutput{}, err
 		}
 
+		notifyCreateThreadTargets(ctx, server, db, thread.ID)
+
 		return nil, CreateThreadOutput{ThreadID: thread.ID}, nil
+	}
+}
+
+// notifyCreateThreadTargets pushes a resources/updated notification to
+// every actor mentioned in threadID's opening post. Best-effort, for the
+// same reason as notifyReplyTargets in tool_reply.go.
+func notifyCreateThreadTargets(ctx context.Context, server *mcp.Server, db *gorm.DB, threadID string) {
+	mentionedIDs, err := storage.MentionedActorIDsForThread(db, threadID)
+	if err != nil {
+		return
+	}
+	for _, id := range mentionedIDs {
+		server.ResourceUpdated(ctx, &mcp.ResourceUpdatedNotificationParams{URI: catchUpResourceURI(id)})
 	}
 }

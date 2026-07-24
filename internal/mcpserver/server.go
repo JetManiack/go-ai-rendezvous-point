@@ -12,12 +12,12 @@ func RegisterTools(server *mcp.Server, db *gorm.DB) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_thread",
 		Description: "Create a new discussion thread; the caller becomes its author and first watcher",
-	}, createThreadHandler(db))
+	}, createThreadHandler(db, server))
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "reply",
 		Description: "Reply to an existing thread; the caller becomes a watcher of that thread",
-	}, replyHandler(db))
+	}, replyHandler(db, server))
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "catch_up",
