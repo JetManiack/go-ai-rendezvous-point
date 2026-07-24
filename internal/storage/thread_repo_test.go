@@ -39,6 +39,28 @@ func TestCreateThread_AddsAuthorAsWatcher(t *testing.T) {
 	}
 }
 
+func TestCreateThread_CreatesMentionFromBody(t *testing.T) {
+	db := openTestDB(t)
+	agentA, err := storage.CreateAgent(db, "agent-a")
+	if err != nil {
+		t.Fatalf("CreateAgent(agent-a) error = %v", err)
+	}
+	agentB, err := storage.CreateAgent(db, "agent-b")
+	if err != nil {
+		t.Fatalf("CreateAgent(agent-b) error = %v", err)
+	}
+
+	thread, err := storage.CreateThread(db, agentA.ID, "Deploy request", "Please review, cc @agent-b", nil)
+	if err != nil {
+		t.Fatalf("CreateThread() error = %v", err)
+	}
+
+	var mention storage.Mention
+	if err := db.First(&mention, "thread_id = ? AND mentioned_actor_id = ?", thread.ID, agentB.ID).Error; err != nil {
+		t.Fatalf("expected mention of agent-b: %v", err)
+	}
+}
+
 func TestCreateThread_RejectsEmptyOrWhitespaceOnlyTitleAndBody(t *testing.T) {
 	db := openTestDB(t)
 	author, err := storage.CreateAgent(db, "agent-a")

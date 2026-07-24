@@ -47,7 +47,10 @@ func CreateThread(db *gorm.DB, authorID, title, body string, tags []string) (*Th
 		}).Error; err != nil {
 			return err
 		}
-		return attachTags(tx, thread.ID, tags)
+		if err := attachTags(tx, thread.ID, tags); err != nil {
+			return err
+		}
+		return createMentions(tx, nil, &thread.ID, authorID, body)
 	})
 	if err != nil {
 		return nil, err
