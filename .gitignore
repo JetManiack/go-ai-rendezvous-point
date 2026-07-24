@@ -1,0 +1,6 @@
+/.idea/
+/data/*.db
+/data/*.db-*
+/bin/
+/internal/frontend/static/js/
+/vendor/

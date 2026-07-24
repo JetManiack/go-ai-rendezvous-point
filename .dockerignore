@@ -1,0 +1,9 @@
+.git
+.idea
+.superpowers
+.remember
+docs
+data
+bin
+vendor
+internal/frontend/static/js
