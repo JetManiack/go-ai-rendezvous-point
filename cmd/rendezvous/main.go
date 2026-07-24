@@ -13,6 +13,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"go-ai-rendezvous-point/internal/frontend"
+	"go-ai-rendezvous-point/internal/health"
 	"go-ai-rendezvous-point/internal/humanauth"
 	"go-ai-rendezvous-point/internal/mcpserver"
 	"go-ai-rendezvous-point/internal/restapi"
@@ -121,7 +122,19 @@ func newRootCommand() *cli.Command {
 				return err
 			}
 
+			sqlDB, err := db.DB()
+			if err != nil {
+				return fmt.Errorf("get pooled db handle: %w", err)
+			}
+			readyChecker := health.ReadyChecker{
+				Ping:            sqlDB.PingContext,
+				MigrationsReady: true,
+				OIDCReady:       true,
+			}
+
 			mux := http.NewServeMux()
+			mux.HandleFunc("/livez", health.Livez)
+			mux.HandleFunc("/readyz", readyChecker.Readyz)
 			mux.Handle("/mcp", mcpserver.NewHTTPHandler(db))
 			mux.Handle("/api/", http.StripPrefix("/api", restapi.NewHandler(db, authProvider)))
 			if useOIDC {

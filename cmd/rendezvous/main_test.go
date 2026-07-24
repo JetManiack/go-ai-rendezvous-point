@@ -74,6 +74,49 @@ func TestServeCommand_StartsHTTPServerOnConfiguredAddr(t *testing.T) {
 	}
 }
 
+// TestServeCommand_ExposesLivezAndReadyzUnauthenticated confirms both
+// health routes answer 2xx with no auth header, since kubelet probes send
+// none.
+func TestServeCommand_ExposesLivezAndReadyzUnauthenticated(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+
+	listener, err := findFreeListener()
+	if err != nil {
+		t.Fatalf("findFreeListener() error = %v", err)
+	}
+	addr := listener.Addr().String()
+	listener.Close()
+
+	cmd := newRootCommand()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- cmd.Run(ctx, []string{"rendezvous", "--listen-addr", addr, "--db-dsn", dbPath, "--auth-stub"})
+	}()
+
+	waitForServer(t, addr)
+
+	for _, path := range []string{"/livez", "/readyz"} {
+		resp, err := http.Get("http://" + addr + path)
+		if err != nil {
+			t.Fatalf("GET %s error = %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s status = %d, want %d", path, resp.StatusCode, http.StatusOK)
+		}
+	}
+
+	cancel()
+	select {
+	case <-errCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not shut down after context cancellation")
+	}
+}
+
 func TestServeCommand_MountsRestAPI(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
