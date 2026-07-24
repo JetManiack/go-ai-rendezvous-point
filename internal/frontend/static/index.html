@@ -453,26 +453,14 @@
 </head>
 <body>
   <div id="root"></div>
-  <script
-    src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"
-    integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z"
-    crossorigin="anonymous"
-  ></script>
-  <script
-    src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"
-    integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1"
-    crossorigin="anonymous"
-  ></script>
-  <script
-    src="https://unpkg.com/marked@13.0.3/marked.min.js"
-    integrity="sha384-YTBHtsL8yVTHcLakYNyrOfK3K+QQcXiECuaALJ+3j7Mo681Rtzadt8NR6WrZH+eQ"
-    crossorigin="anonymous"
-  ></script>
-  <script
-    src="https://unpkg.com/dompurify@3.4.12/dist/purify.min.js"
-    integrity="sha384-piCcpDdJ7qVeK4Tv8Z6Hpcr3ZBIgP16TxQTPVfsLFdZ5uDgwc3Y8Ho7oUnqf12qu"
-    crossorigin="anonymous"
-  ></script>
+  <!-- Vendored at build time (see Makefile's vendor-frontend-js target) and
+       served from our own origin — no runtime dependency on a third-party
+       CDN, and no CDN-supplied code (notably the sanitizer) executing in
+       the same origin as authenticated sessions. -->
+  <script src="/js/vendor/react.production.min.js"></script>
+  <script src="/js/vendor/react-dom.production.min.js"></script>
+  <script src="/js/vendor/marked.min.js"></script>
+  <script src="/js/vendor/purify.min.js"></script>
   <script src="/js/app.bundle.js"></script>
 </body>
 </html>
