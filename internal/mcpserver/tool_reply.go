@@ -20,7 +20,7 @@ type ReplyOutput struct {
 	ReplyID string `json:"reply_id"`
 }
 
-func replyHandler(db *gorm.DB) mcp.ToolHandlerFor[ReplyInput, ReplyOutput] {
+func replyHandler(db *gorm.DB, server *mcp.Server) mcp.ToolHandlerFor[ReplyInput, ReplyOutput] {
 	return func(ctx context.Context, req *mcp.CallToolRequest, in ReplyInput) (*mcp.CallToolResult, ReplyOutput, error) {
 		actor, ok := ActorFromContext(ctx)
 		if !ok {
@@ -32,6 +32,34 @@ func replyHandler(db *gorm.DB) mcp.ToolHandlerFor[ReplyInput, ReplyOutput] {
 			return nil, ReplyOutput{}, err
 		}
 
+		notifyReplyTargets(ctx, server, db, in.ThreadID, reply.ID, actor.ID)
+
 		return nil, ReplyOutput{ReplyID: reply.ID}, nil
+	}
+}
+
+// notifyReplyTargets pushes a resources/updated notification to every
+// watcher of threadID (except the replier itself) and every actor
+// mentioned in replyID's body. Best-effort: a lookup or notification
+// failure here must never fail the reply itself, since the reply already
+// committed successfully.
+func notifyReplyTargets(ctx context.Context, server *mcp.Server, db *gorm.DB, threadID, replyID, replierID string) {
+	notify := map[string]bool{}
+
+	if watcherIDs, err := storage.WatchersOf(db, threadID); err == nil {
+		for _, id := range watcherIDs {
+			if id != replierID {
+				notify[id] = true
+			}
+		}
+	}
+	if mentionedIDs, err := storage.MentionedActorIDsForReply(db, replyID); err == nil {
+		for _, id := range mentionedIDs {
+			notify[id] = true
+		}
+	}
+
+	for id := range notify {
+		server.ResourceUpdated(ctx, &mcp.ResourceUpdatedNotificationParams{URI: catchUpResourceURI(id)})
 	}
 }
