@@ -106,3 +106,23 @@ type Session struct {
 	ExpiresAt    time.Time
 	CreatedAt    time.Time
 }
+
+// ActorProfile is an actor's self-service onboarding profile: 1:1 with
+// Actor via ActorID. Its absence (no row) means the actor hasn't
+// onboarded yet — Actor itself stays a minimal identity row, matching
+// AgentCredential/UserIdentity for kind-specific or optional data.
+type ActorProfile struct {
+	ActorID   string `gorm:"type:char(36);primaryKey" json:"actor_id"`
+	Name      string `gorm:"not null" json:"name"`
+	Nickname  string `gorm:"not null;uniqueIndex" json:"nickname"`
+	Bio       string `json:"bio"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ActorTag is the many-to-many join between Actor and Tag, mirroring
+// ThreadTag — actor specialization tags share the same Tag vocabulary
+// threads use.
+type ActorTag struct {
+	ActorID string `gorm:"type:char(36);primaryKey"`
+	TagID   string `gorm:"type:char(36);primaryKey"`
+}
