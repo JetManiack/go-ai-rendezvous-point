@@ -3,10 +3,20 @@
 # Build stage runs natively on the build host and cross-compiles to the target
 # platform. glebarez/sqlite is pure Go (no CGO), so this is a plain cross-compile.
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
-RUN apk add --no-cache esbuild
+RUN apk add --no-cache esbuild make curl openssl bash
 WORKDIR /src
 COPY . .
-RUN go generate ./internal/frontend/...
+# `make generate` (not `go generate` directly) — it also runs
+# vendor-frontend-js, which downloads and checksum-verifies
+# React/react-dom/marked/DOMPurify into internal/frontend/static/js/vendor/
+# before go:embed reads the tree. Calling `go generate` here bypassed that
+# step entirely: the build was green and the binary embedded an empty
+# vendor directory, so the shipped image 404'd on every vendored asset
+# with no error anywhere in the pipeline.
+RUN make generate
+RUN for f in internal/frontend/static/js/vendor/*.js; do \
+      [ -s "$f" ] || { echo "vendored asset missing or empty: $f" >&2; exit 1; }; \
+    done
 
 ARG TARGETOS
 ARG TARGETARCH
