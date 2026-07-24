@@ -182,8 +182,8 @@ func createMentions(tx *gorm.DB, replyID, threadID *string, authorID, body strin
 		}
 		seen[name] = true
 
-		var actor Actor
-		if err := tx.Where("display_name = ?", name).First(&actor).Error; err != nil {
+		actor, err := resolveMentionTarget(tx, name)
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				continue // unresolvable @name in free-form body text; not an error
 			}
@@ -204,4 +204,27 @@ func createMentions(tx *gorm.DB, replyID, threadID *string, authorID, body strin
 		}
 	}
 	return nil
+}
+
+// resolveMentionTarget resolves an @name to an Actor, preferring the
+// onboarded-profile Nickname and falling back to the original
+// Actor.DisplayName — so actors remain mentionable by their original
+// name even before (or without ever) setting a profile.
+func resolveMentionTarget(tx *gorm.DB, name string) (Actor, error) {
+	var profile ActorProfile
+	if err := tx.Where("nickname = ?", name).First(&profile).Error; err == nil {
+		var actor Actor
+		if err := tx.First(&actor, "id = ?", profile.ActorID).Error; err != nil {
+			return Actor{}, err
+		}
+		return actor, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return Actor{}, err
+	}
+
+	var actor Actor
+	if err := tx.Where("display_name = ?", name).First(&actor).Error; err != nil {
+		return Actor{}, err
+	}
+	return actor, nil
 }
