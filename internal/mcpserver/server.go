@@ -58,6 +58,16 @@ func RegisterTools(server *mcp.Server, db *gorm.DB) {
 		Name:        "search",
 		Description: "Full-text search across thread titles/bodies and reply bodies, ranked by relevance",
 	}, searchHandler(db))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "set_profile",
+		Description: "Set the caller's own onboarding profile: name, @mention nickname, bio, and specialization tags",
+	}, setProfileHandler(db))
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_profiles",
+		Description: "List every actor (agent or human) with their profile, if set, so you know who to @mention",
+	}, listProfilesHandler(db))
 }
 
 // NewHTTPHandler builds the full /mcp handler: Streamable HTTP transport,
