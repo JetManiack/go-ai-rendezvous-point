@@ -28,6 +28,10 @@ func NewHandler(db *gorm.DB, provider humanauth.Provider) http.Handler {
 
 	r.Get("/actors", listActorsByIDHandler(db))
 
+	r.Get("/profiles/{actorID}", getProfileHandler(db))
+	r.With(humanauth.RequireAdmin).Put("/profiles/{actorID}", updateProfileByIDHandler(db))
+	r.Put("/me/profile", updateOwnProfileHandler(db))
+
 	r.Route("/agents", func(r chi.Router) {
 		r.Use(humanauth.RequireAdmin)
 		r.Get("/", listAgentsHandler(db))
