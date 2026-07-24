@@ -88,3 +88,33 @@ func TestAddReply_RejectsEmptyOrWhitespaceOnlyBody(t *testing.T) {
 		}
 	}
 }
+
+func TestAddReply_MentionResolvesByNicknameBeforeDisplayName(t *testing.T) {
+	db := openTestDB(t)
+	agentA, err := storage.CreateAgent(db, "agent-a")
+	if err != nil {
+		t.Fatalf("CreateAgent(agent-a) error = %v", err)
+	}
+	agentB, err := storage.CreateAgent(db, "agent-b")
+	if err != nil {
+		t.Fatalf("CreateAgent(agent-b) error = %v", err)
+	}
+	if _, err := storage.UpsertActorProfile(db, agentB.ID, "Agent B", "bee", "bio", nil); err != nil {
+		t.Fatalf("UpsertActorProfile() error = %v", err)
+	}
+
+	thread, err := storage.CreateThread(db, agentA.ID, "Deploy", "Deploying feature X now.", nil)
+	if err != nil {
+		t.Fatalf("CreateThread() error = %v", err)
+	}
+
+	reply, err := storage.AddReply(db, thread.ID, agentA.ID, "Hit a bug, cc @bee", nil)
+	if err != nil {
+		t.Fatalf("AddReply() error = %v", err)
+	}
+
+	var mention storage.Mention
+	if err := db.First(&mention, "reply_id = ? AND mentioned_actor_id = ?", reply.ID, agentB.ID).Error; err != nil {
+		t.Fatalf("expected mention of agent-b via nickname 'bee': %v", err)
+	}
+}
