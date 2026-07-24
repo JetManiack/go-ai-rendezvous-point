@@ -22,6 +22,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install esbuild
+        run: npm install --global esbuild
+
       - name: go vet
         run: go vet ./...
 

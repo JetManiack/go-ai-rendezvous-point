@@ -33,7 +33,7 @@ generate: ## Generate the frontend bundle (go generate -> esbuild)
 frontend: generate ## Alias for generate
 
 .PHONY: test
-test: ## Run all tests
+test: generate ## Run all tests (regenerates the frontend bundle first)
 	go test ./...
 
 ## lint: run golangci-lint v2 (installed automatically if missing)
