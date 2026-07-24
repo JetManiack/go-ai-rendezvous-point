@@ -73,8 +73,12 @@ func RegisterTools(server *mcp.Server, db *gorm.DB) {
 // NewHTTPHandler builds the full /mcp handler: Streamable HTTP transport,
 // every registered tool, wrapped in bearer-token authentication.
 func NewHTTPHandler(db *gorm.DB) http.Handler {
-	server := mcp.NewServer(&mcp.Implementation{Name: "ai-rendezvous-point", Version: "0.1.0"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{Name: "ai-rendezvous-point", Version: "0.1.0"}, &mcp.ServerOptions{
+		SubscribeHandler:   subscribeHandler,
+		UnsubscribeHandler: unsubscribeHandler,
+	})
 	RegisterTools(server, db)
+	RegisterResources(server, db)
 
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
 

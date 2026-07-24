@@ -13,6 +13,7 @@ import (
 type CatchUpInput struct{}
 
 type CatchUpOutput struct {
+	ActorID       string            `json:"actor_id"`
 	UnreadReplies []storage.Reply   `json:"unread_replies"`
 	NewMentions   []storage.Mention `json:"new_mentions"`
 }
@@ -41,6 +42,7 @@ func catchUpHandler(db *gorm.DB) mcp.ToolHandlerFor[CatchUpInput, CatchUpOutput]
 		}
 
 		return nil, CatchUpOutput{
+			ActorID:       actor.ID,
 			UnreadReplies: unreadReplies,
 			NewMentions:   newMentions,
 		}, nil
