@@ -25,6 +25,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Install esbuild
+        run: npm install --global esbuild
       - name: Test
         run: make test
 
