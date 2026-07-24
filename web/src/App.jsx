@@ -3,6 +3,7 @@ import { useCurrentUser } from "./currentUser.js";
 import Agents from "./Agents.jsx";
 import ThreadList from "./ThreadList.jsx";
 import ThreadDetail from "./ThreadDetail.jsx";
+import Profile from "./Profile.jsx";
 
 export default function App() {
   const route = useHashRoute();
@@ -28,6 +29,11 @@ export default function App() {
       return <ThreadList role={user.role} />;
     }
     return <Agents role={user.role} />;
+  }
+
+  const profileMatch = route.path.match(/^\/profiles\/(.+)$/);
+  if (profileMatch) {
+    return <Profile actorId={profileMatch[1]} role={user.role} currentActorId={user.actor_id} />;
   }
 
   const threadMatch = route.path.match(/^\/threads\/(.+)$/);

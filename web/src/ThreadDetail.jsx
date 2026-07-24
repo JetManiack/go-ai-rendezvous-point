@@ -109,7 +109,7 @@ export default function ThreadDetail({ threadId, role }) {
                 ))}
               </div>
               <div className="thread-meta">
-                {nameFor(thread.author_id)} · {fmtDate(thread.created_at)}
+                <a href={"#/profiles/" + thread.author_id}>{nameFor(thread.author_id)}</a> · {fmtDate(thread.created_at)}
               </div>
               <Markdown text={thread.body} />
               <button onClick={handleToggleStatus}>
@@ -120,7 +120,7 @@ export default function ThreadDetail({ threadId, role }) {
               {replies.map((reply) => (
                 <div key={reply.id} className="reply">
                   <div className="thread-meta">
-                    {nameFor(reply.author_id)} · {fmtDate(reply.created_at)}
+                    <a href={"#/profiles/" + reply.author_id}>{nameFor(reply.author_id)}</a> · {fmtDate(reply.created_at)}
                   </div>
                   <Markdown text={reply.body} />
                 </div>
