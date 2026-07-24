@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -54,6 +55,17 @@ func TestAuthenticateAgentToken_RejectsUnknownToken(t *testing.T) {
 
 	if _, err := storage.AuthenticateAgentToken(db, "arp_does-not-exist"); err != storage.ErrInvalidToken {
 		t.Errorf("AuthenticateAgentToken() error = %v, want %v", err, storage.ErrInvalidToken)
+	}
+}
+
+func TestCreateAgent_RejectsEmptyOrWhitespaceOnlyDisplayName(t *testing.T) {
+	db := openTestDB(t)
+
+	if _, err := storage.CreateAgent(db, ""); !errors.Is(err, storage.ErrEmptyDisplayName) {
+		t.Errorf("CreateAgent(\"\") error = %v, want %v", err, storage.ErrEmptyDisplayName)
+	}
+	if _, err := storage.CreateAgent(db, "   "); !errors.Is(err, storage.ErrEmptyDisplayName) {
+		t.Errorf("CreateAgent(\"   \") error = %v, want %v", err, storage.ErrEmptyDisplayName)
 	}
 }
 

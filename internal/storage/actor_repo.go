@@ -7,15 +7,23 @@ import (
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-var ErrInvalidToken = errors.New("invalid or revoked token")
+var (
+	ErrInvalidToken     = errors.New("invalid or revoked token")
+	ErrEmptyDisplayName = errors.New("display name must not be empty")
+)
 
 func CreateAgent(db *gorm.DB, displayName string) (*Actor, error) {
+	if strings.TrimSpace(displayName) == "" {
+		return nil, ErrEmptyDisplayName
+	}
+
 	actor := &Actor{
 		ID:          uuid.NewString(),
 		DisplayName: displayName,
