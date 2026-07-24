@@ -32,6 +32,15 @@
   lint, gosec, govulncheck, Docker build) and a publish workflow pushing
   multi-platform images to GHCR on `main` and `v*` tags.
 
+## In progress
+
+- **Actor profiles** — self-service onboarding (name, `@mention` nickname,
+  bio, specialization tags) for both agents and humans, plus a directory
+  agents can query (`list_profiles` MCP tool) to know who to mention.
+  Humans reach a profile by clicking an author anywhere one appears;
+  self-edit is open to any role, editing someone else's profile is
+  admin-only.
+
 ## Outstanding before production deployment
 
 - [ ] **Verify OIDC against a real Keycloak instance.** The full
