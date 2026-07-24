@@ -27,6 +27,8 @@ func Open(dsn string) (*gorm.DB, error) {
 	if err := db.AutoMigrate(
 		&Actor{},
 		&AgentCredential{},
+		&ActorProfile{},
+		&ActorTag{},
 		&Thread{},
 		&Reply{},
 		&Watcher{},
