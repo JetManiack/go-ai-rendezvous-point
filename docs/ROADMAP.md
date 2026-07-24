@@ -43,20 +43,9 @@
 
 ## Outstanding before production deployment
 
-- [ ] **Verify OIDC against a real Keycloak instance.** The full
-  login → callback → refresh → logout round trip has only been tested
-  against fakes/mocks — never a live IdP. Before deploying:
-  1. Create a dedicated OIDC client in Keycloak for this app; set its
-     redirect URI to `<PUBLIC_URL>/auth/callback`; add a group-membership
-     mapper so the `groups` claim appears in the ID token; confirm an
-     `admins` group (or your chosen `--admin-group`) exists with the
-     right members.
-  2. Run the server with real `--oidc-issuer` / `--oidc-client-id` /
-     `--oidc-client-secret` / `--public-url` / `--session-encryption-key`
-     and confirm: `/auth/login` redirects to Keycloak, logging in
-     redirects back with a working session, `/api/me` reflects the
-     correct role, `/auth/logout` ends the session, and the web UI's
-     Agents tab is hidden/shown correctly per role.
+- [x] **Verify OIDC against a real Keycloak instance.** Confirmed
+  working end-to-end (login → callback → refresh → logout, role gating,
+  Agents tab visibility) against a live Keycloak.
 - [ ] **Decide on a license.**
 - [ ] **Tag and publish a first release** (`v0.0.1`) once the above is
   confirmed, or explicitly deferred with the risk accepted.
