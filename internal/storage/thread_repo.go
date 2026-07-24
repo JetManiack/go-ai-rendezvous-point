@@ -86,7 +86,27 @@ func attachTags(tx *gorm.DB, threadID string, tagNames []string) error {
 	return nil
 }
 
-var mentionPattern = regexp.MustCompile(`@([a-zA-Z0-9_-]+)`)
+var (
+	mentionPattern         = regexp.MustCompile(`@([a-zA-Z0-9_-]+)`)
+	fencedCodeBlockPattern = regexp.MustCompile("(?s)```.*?```")
+	inlineCodeSpanPattern  = regexp.MustCompile("`[^`\n]*`")
+)
+
+// stripCodeRegions blanks out fenced code blocks and inline code spans so
+// mention scanning ignores @handles that only appear as pasted example
+// text (logs, diffs, manifests) rather than as a genuine ping. Only the
+// scan sees this transformed copy — the original body is stored and
+// rendered unchanged. Fenced blocks are stripped first so any backticks
+// inside one don't confuse the inline-span pass over what's left.
+func stripCodeRegions(body string) string {
+	body = fencedCodeBlockPattern.ReplaceAllStringFunc(body, blankOut)
+	body = inlineCodeSpanPattern.ReplaceAllStringFunc(body, blankOut)
+	return body
+}
+
+func blankOut(s string) string {
+	return strings.Repeat(" ", len(s))
+}
 
 func AddReply(db *gorm.DB, threadID, authorID, body string, extraWatcherIDs []string) (*Reply, error) {
 	if strings.TrimSpace(body) == "" {
@@ -169,29 +189,34 @@ func ensureThreadWatch(tx *gorm.DB, actorID, threadID string) error {
 }
 
 func createMentions(tx *gorm.DB, replyID, threadID *string, authorID, body string) error {
-	matches := mentionPattern.FindAllStringSubmatch(body, -1)
+	matches := mentionPattern.FindAllStringSubmatch(stripCodeRegions(body), -1)
 	if len(matches) == 0 {
 		return nil
 	}
 
-	seen := map[string]bool{}
+	seenNames := map[string]bool{}  // skip redundant lookups for a literally-repeated handle
+	seenActors := map[string]bool{} // the actual notify-once guarantee: one row per actor per post
 	for _, m := range matches {
 		name := m[1]
-		if seen[name] {
+		if seenNames[name] {
 			continue
 		}
-		seen[name] = true
+		seenNames[name] = true
 
-		actor, err := resolveMentionTarget(tx, name)
+		actor, ok, err := resolveMentionTarget(tx, name)
 		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				continue // unresolvable @name in free-form body text; not an error
-			}
 			return err
+		}
+		if !ok {
+			continue // unresolvable or ambiguous @name in free-form body text; not an error
 		}
 		if actor.ID == authorID {
 			continue // don't notify yourself
 		}
+		if seenActors[actor.ID] {
+			continue // same actor already mentioned via a different spelling in this post
+		}
+		seenActors[actor.ID] = true
 
 		mention := &Mention{
 			ID:               uuid.NewString(),
@@ -206,25 +231,113 @@ func createMentions(tx *gorm.DB, replyID, threadID *string, authorID, body strin
 	return nil
 }
 
-// resolveMentionTarget resolves an @name to an Actor, preferring the
-// onboarded-profile Nickname and falling back to the original
-// Actor.DisplayName — so actors remain mentionable by their original
-// name even before (or without ever) setting a profile.
-func resolveMentionTarget(tx *gorm.DB, name string) (Actor, error) {
-	var profile ActorProfile
-	if err := tx.Where("nickname = ?", name).First(&profile).Error; err == nil {
-		var actor Actor
-		if err := tx.First(&actor, "id = ?", profile.ActorID).Error; err != nil {
-			return Actor{}, err
-		}
-		return actor, nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return Actor{}, err
+// resolveMentionTarget resolves an @name to an Actor. Precedence: exact
+// nickname, exact display_name, case-folded nickname, case-folded
+// display_name — exact matches win over folded ones, and nickname (the
+// onboarded, identifier-shaped field) wins over the original
+// display_name, so actors remain mentionable by their original name even
+// before (or without ever) setting a profile.
+//
+// A folded lookup that matches more than one actor (e.g. two actors whose
+// nicknames differ only by case) is ambiguous and resolves to nobody —
+// ok=false — rather than picking one arbitrarily. Both nickname and
+// display_name are UNIQUE columns, so only the case-insensitive lookups
+// can ever be ambiguous; exact lookups never are.
+func resolveMentionTarget(tx *gorm.DB, name string) (actor Actor, ok bool, err error) {
+	if actor, ok, err = actorByExactNickname(tx, name); err != nil || ok {
+		return actor, ok, err
+	}
+	if actor, ok, err = actorByExactDisplayName(tx, name); err != nil || ok {
+		return actor, ok, err
 	}
 
-	var actor Actor
-	if err := tx.Where("display_name = ?", name).First(&actor).Error; err != nil {
-		return Actor{}, err
+	foldedActor, ambiguous, err := actorByFoldedNickname(tx, name)
+	if err != nil {
+		return Actor{}, false, err
 	}
-	return actor, nil
+	if ambiguous {
+		return Actor{}, false, nil
+	}
+	if foldedActor != nil {
+		return *foldedActor, true, nil
+	}
+
+	foldedActor, ambiguous, err = actorByFoldedDisplayName(tx, name)
+	if err != nil {
+		return Actor{}, false, err
+	}
+	if ambiguous {
+		return Actor{}, false, nil
+	}
+	if foldedActor != nil {
+		return *foldedActor, true, nil
+	}
+
+	return Actor{}, false, nil
+}
+
+func actorByExactNickname(tx *gorm.DB, name string) (Actor, bool, error) {
+	var profile ActorProfile
+	err := tx.Where("nickname = ?", name).First(&profile).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return Actor{}, false, nil
+	}
+	if err != nil {
+		return Actor{}, false, err
+	}
+	var actor Actor
+	if err := tx.First(&actor, "id = ?", profile.ActorID).Error; err != nil {
+		return Actor{}, false, err
+	}
+	return actor, true, nil
+}
+
+func actorByExactDisplayName(tx *gorm.DB, name string) (Actor, bool, error) {
+	var actor Actor
+	err := tx.Where("display_name = ?", name).First(&actor).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return Actor{}, false, nil
+	}
+	if err != nil {
+		return Actor{}, false, err
+	}
+	return actor, true, nil
+}
+
+// actorByFoldedNickname case-insensitively matches name against
+// ActorProfile.Nickname. ambiguous=true means more than one profile
+// matched and the caller must not pick one arbitrarily.
+func actorByFoldedNickname(tx *gorm.DB, name string) (matched *Actor, ambiguous bool, err error) {
+	var profiles []ActorProfile
+	if err := tx.Where("lower(nickname) = lower(?)", name).Find(&profiles).Error; err != nil {
+		return nil, false, err
+	}
+	if len(profiles) == 0 {
+		return nil, false, nil
+	}
+	if len(profiles) > 1 {
+		return nil, true, nil
+	}
+	var actor Actor
+	if err := tx.First(&actor, "id = ?", profiles[0].ActorID).Error; err != nil {
+		return nil, false, err
+	}
+	return &actor, false, nil
+}
+
+// actorByFoldedDisplayName case-insensitively matches name against
+// Actor.DisplayName. ambiguous=true means more than one actor matched
+// and the caller must not pick one arbitrarily.
+func actorByFoldedDisplayName(tx *gorm.DB, name string) (matched *Actor, ambiguous bool, err error) {
+	var actors []Actor
+	if err := tx.Where("lower(display_name) = lower(?)", name).Find(&actors).Error; err != nil {
+		return nil, false, err
+	}
+	if len(actors) == 0 {
+		return nil, false, nil
+	}
+	if len(actors) > 1 {
+		return nil, true, nil
+	}
+	return &actors[0], false, nil
 }
