@@ -26,9 +26,10 @@ run: generate ## Run the server locally with stub auth (DB_DSN=data/rendezvous.d
 	AUTH_STUB=true DB_DSN="data/rendezvous.db" go run $(CMD_DIR) $(ARGS)
 
 FRONTEND_VENDOR_DIR := internal/frontend/static/js/vendor
+FRONTEND_FONTS_DIR  := internal/frontend/static/fonts
 
-.PHONY: generate frontend vendor-frontend-js
-generate: vendor-frontend-js ## Generate the frontend bundle (go generate -> esbuild) and vendor pinned JS deps
+.PHONY: generate frontend vendor-frontend-js vendor-frontend-fonts
+generate: vendor-frontend-js vendor-frontend-fonts ## Generate the frontend bundle (go generate -> esbuild) and vendor pinned JS/font deps
 	@command -v esbuild >/dev/null || (echo "esbuild not found. Install: 'brew install esbuild' or 'npm i -g esbuild'"; exit 1)
 	go generate ./internal/frontend/...
 
@@ -52,6 +53,32 @@ $(FRONTEND_VENDOR_DIR)/purify.min.js: SHA256 := c45ba939765574f96cbf35ee9b6d89f7
 # every page load.
 $(FRONTEND_VENDOR_DIR)/%.js:
 	@mkdir -p $(FRONTEND_VENDOR_DIR)
+	curl -fsSL -o $@ $(URL)
+	@actual=$$(openssl dgst -sha256 $@ | awk '{print $$NF}'); \
+	if [ "$$actual" != "$(SHA256)" ]; then \
+		echo "checksum mismatch for $@: expected $(SHA256), got $$actual"; rm -f $@; exit 1; \
+	fi
+
+vendor-frontend-fonts: $(FRONTEND_FONTS_DIR)/space-grotesk.woff2 $(FRONTEND_FONTS_DIR)/ibm-plex-sans.woff2 $(FRONTEND_FONTS_DIR)/jetbrains-mono.woff2 ## Download & checksum-verify pinned fonts (Space Grotesk, IBM Plex Sans, JetBrains Mono), served from our own origin instead of fonts.googleapis.com/fonts.gstatic.com
+
+# Google Fonts serves one variable-weight woff2 per family for a
+# multi-weight request like ours (:wght@500;600;700) — that's why a
+# single file per family below covers every weight index.html uses, and
+# why there's only one target per family rather than one per weight.
+# Latin subset only: this app's UI text is English, and the design's
+# font stack already falls back to system fonts for anything outside
+# it, so full multi-script coverage isn't worth the extra vendored
+# files. URLs pinned from the same Google Fonts CSS request index.html
+# used to load client-side.
+$(FRONTEND_FONTS_DIR)/space-grotesk.woff2: URL := https://fonts.gstatic.com/s/spacegrotesk/v22/V8mDoQDjQSkFtoMM3T6r8E7mPbF4Cw.woff2
+$(FRONTEND_FONTS_DIR)/space-grotesk.woff2: SHA256 := 0640890476fc1198ab4de571fb658de443c4d85b66466ec09534a8737ab1ce9d
+$(FRONTEND_FONTS_DIR)/ibm-plex-sans.woff2: URL := https://fonts.gstatic.com/s/ibmplexsans/v23/zYXzKVElMYYaJe8bpLHnCwDKr932-G7dytD-Dmu1syxeKYY.woff2
+$(FRONTEND_FONTS_DIR)/ibm-plex-sans.woff2: SHA256 := e2291e842cf5af167122a22881a740c7f2dda7716f1e8cd76680264f4a859470
+$(FRONTEND_FONTS_DIR)/jetbrains-mono.woff2: URL := https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxDcwg.woff2
+$(FRONTEND_FONTS_DIR)/jetbrains-mono.woff2: SHA256 := 83c005d49d8a6a50474c73a5a36ac0468076e9c4a29da7bdb14995d80560a5be
+
+$(FRONTEND_FONTS_DIR)/%.woff2:
+	@mkdir -p $(FRONTEND_FONTS_DIR)
 	curl -fsSL -o $@ $(URL)
 	@actual=$$(openssl dgst -sha256 $@ | awk '{print $$NF}'); \
 	if [ "$$actual" != "$(SHA256)" ]; then \
