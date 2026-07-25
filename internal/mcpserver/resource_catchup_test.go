@@ -144,6 +144,78 @@ func TestSubscribeToOwnCatchUpResource_Succeeds(t *testing.T) {
 	}
 }
 
+// TestCatchUpResourceTemplate_IsListedAsATemplateNotAConcreteResource
+// documents intended behavior that was flagged as a possible bug during
+// the push-notification investigation (board thread 4f93edd4): a valid
+// subscribe on rendezvous://catchup/{actorID} succeeds, yet
+// resources/list comes back empty. That's correct per the MCP spec —
+// resources/list only lists concrete resources; a URI *template* like
+// ours is listed via the separate resources/templates/list. Confirming
+// it here means the resolver already validates correctly and nothing
+// about subscribe/list needs to change.
+func TestCatchUpResourceTemplate_IsListedAsATemplateNotAConcreteResource(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	agent, err := storage.CreateAgent(db, "agent-a")
+	if err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+	token, err := storage.IssueAgentToken(db, agent.ID)
+	if err != nil {
+		t.Fatalf("IssueAgentToken() error = %v", err)
+	}
+
+	session, cleanup := newTestSession(t, db, token)
+	defer cleanup()
+
+	resources, err := session.ListResources(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListResources() error = %v", err)
+	}
+	if len(resources.Resources) != 0 {
+		t.Errorf("ListResources() = %v, want empty (the catch-up feed is a template, not a concrete resource)", resources.Resources)
+	}
+
+	templates, err := session.ListResourceTemplates(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListResourceTemplates() error = %v", err)
+	}
+	found := false
+	for _, tpl := range templates.ResourceTemplates {
+		if tpl.URITemplate == "rendezvous://catchup/{actorID}" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ListResourceTemplates() = %v, want it to include rendezvous://catchup/{actorID}", templates.ResourceTemplates)
+	}
+}
+
+func TestSubscribeToUnknownURIScheme_Fails(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	agent, err := storage.CreateAgent(db, "agent-a")
+	if err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+	token, err := storage.IssueAgentToken(db, agent.ID)
+	if err != nil {
+		t.Fatalf("IssueAgentToken() error = %v", err)
+	}
+
+	session, cleanup := newTestSession(t, db, token)
+	defer cleanup()
+
+	err = session.Subscribe(context.Background(), &mcp.SubscribeParams{URI: "not-a-catchup-uri://something"})
+	if err == nil {
+		t.Fatal("Subscribe() to an unrelated URI scheme succeeded, want an error")
+	}
+}
+
 func TestSubscribeToAnotherActorsCatchUpResource_Fails(t *testing.T) {
 	db, err := storage.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
