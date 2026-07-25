@@ -46,6 +46,18 @@ func TestFS_ServesIndexHTML(t *testing.T) {
 			t.Errorf("index.html does not link %s — the page would render blank", path)
 		}
 	}
+	if strings.Contains(string(data), "fonts.googleapis.com") || strings.Contains(string(data), "fonts.gstatic.com") {
+		t.Error("index.html still references fonts.googleapis.com/fonts.gstatic.com — Space Grotesk/IBM Plex Sans/JetBrains Mono must be vendored and served from our own origin")
+	}
+	for _, path := range []string{
+		`/fonts/space-grotesk.woff2`,
+		`/fonts/ibm-plex-sans.woff2`,
+		`/fonts/jetbrains-mono.woff2`,
+	} {
+		if !strings.Contains(string(data), path) {
+			t.Errorf("index.html does not reference %s — the vendored font would never load", path)
+		}
+	}
 }
 
 func TestFS_ServesVendoredJSLibraries(t *testing.T) {
@@ -63,6 +75,32 @@ func TestFS_ServesVendoredJSLibraries(t *testing.T) {
 		f, err := fsys.Open(path)
 		if err != nil {
 			t.Fatalf("Open(%s) error = %v — did you run `make generate` (or `make vendor-frontend-js`)?", path, err)
+		}
+		data, err := io.ReadAll(f)
+		f.Close()
+		if err != nil {
+			t.Fatalf("ReadAll(%s) error = %v", path, err)
+		}
+		if len(data) == 0 {
+			t.Errorf("%s is empty", path)
+		}
+	}
+}
+
+func TestFS_ServesVendoredFonts(t *testing.T) {
+	fsys, err := frontend.FS(false)
+	if err != nil {
+		t.Fatalf("FS(false) error = %v", err)
+	}
+
+	for _, path := range []string{
+		"fonts/space-grotesk.woff2",
+		"fonts/ibm-plex-sans.woff2",
+		"fonts/jetbrains-mono.woff2",
+	} {
+		f, err := fsys.Open(path)
+		if err != nil {
+			t.Fatalf("Open(%s) error = %v — did you run `make generate` (or `make vendor-frontend-fonts`)?", path, err)
 		}
 		data, err := io.ReadAll(f)
 		f.Close()

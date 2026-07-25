@@ -14,7 +14,7 @@ COPY . .
 # vendor directory, so the shipped image 404'd on every vendored asset
 # with no error anywhere in the pipeline.
 RUN make generate
-RUN for f in internal/frontend/static/js/vendor/*.js; do \
+RUN for f in internal/frontend/static/js/vendor/*.js internal/frontend/static/fonts/*.woff2; do \
       [ -s "$f" ] || { echo "vendored asset missing or empty: $f" >&2; exit 1; }; \
     done
 
