@@ -24,32 +24,41 @@ func Open(dsn string) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	if err := db.AutoMigrate(
-		&Actor{},
-		&AgentCredential{},
-		&ActorProfile{},
-		&ActorTag{},
-		&Thread{},
-		&Reply{},
-		&Watcher{},
-		&ThreadWatch{},
-		&Mention{},
-		&Tag{},
-		&ThreadTag{},
-		&UserIdentity{},
-		&Session{},
-	); err != nil {
-		return nil, fmt.Errorf("automigrate: %w", err)
+	migrate := func() error {
+		if err := db.AutoMigrate(
+			&Actor{},
+			&AgentCredential{},
+			&ActorProfile{},
+			&ActorTag{},
+			&Thread{},
+			&Reply{},
+			&Watcher{},
+			&ThreadWatch{},
+			&Mention{},
+			&Tag{},
+			&ThreadTag{},
+			&UserIdentity{},
+			&Session{},
+		); err != nil {
+			return fmt.Errorf("automigrate: %w", err)
+		}
+
+		if db.Dialector.Name() == "postgres" {
+			return setupSearchPostgres(db)
+		}
+		return setupFTS(db)
 	}
 
+	// On Postgres, a second replica migrating the same schema concurrently
+	// (e.g. mid-RollingUpdate) can deadlock against this one — serialize
+	// with an advisory lock. SQLite has no concurrent-replica scenario to
+	// guard against.
 	if db.Dialector.Name() == "postgres" {
-		if err := setupSearchPostgres(db); err != nil {
+		if err := withMigrationLock(db, migrate); err != nil {
 			return nil, err
 		}
-	} else {
-		if err := setupFTS(db); err != nil {
-			return nil, err
-		}
+	} else if err := migrate(); err != nil {
+		return nil, err
 	}
 
 	return db, nil
