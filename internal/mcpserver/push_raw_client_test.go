@@ -13,17 +13,20 @@ package mcpserver_test
 // (mention and watched-thread reply) and a realistic delay before
 // firing.
 //
-// Both currently PASS against this codebase: the notification is
-// delivered correctly over a real standing GET stream, with a genuine
-// second HTTP connection, no SDK client involved. That is the opposite
-// of what was observed live (thread 4f93edd4, three rounds, zero bytes
-// delivered on either Cloudflare or a direct kubectl port-forward to the
-// pod). Since this reproduction is faithful to the protocol sequence and
-// still can't reproduce the failure, the most likely explanation is
-// something specific to the deployment path (a proxy or service-mesh
-// sidecar buffering/compressing a text/event-stream response) rather
-// than a defect in this application's code or the vendored SDK — see the
-// reply to 4f93edd4 that accompanies this commit for the follow-up ask.
+// Faithful as they are to the protocol, these two could not reproduce
+// the live failure, because the protocol was never the variable: they run
+// against httptest.NewServer, whose *http.Server has every timeout at
+// zero, while production sets WriteTimeout. That one config difference
+// was the whole bug —
+// TestPushNotification_DelayedPushSurvivesServerWriteTimeout below is the
+// case that catches it, and the comment on
+// mcpserver.withoutWriteDeadline explains why the failure is silent on
+// both ends.
+//
+// The lesson worth keeping: a transport-level test that stands up its
+// server with different timeouts than production is testing a different
+// server. Configure the harness like production, or it will stay blind in
+// exactly the place production differs.
 
 import (
 	"bufio"
@@ -40,6 +43,23 @@ import (
 	"go-ai-rendezvous-point/internal/mcpserver"
 	"go-ai-rendezvous-point/internal/storage"
 )
+
+// newRawTestServer starts an httptest server whose *http.Server can be
+// configured before it accepts connections. httptest.NewServer leaves
+// every timeout at zero, which is exactly the production-only
+// configuration the tests in this file were blind to (see
+// TestPushNotification_DelayedPushSurvivesServerWriteTimeout).
+func newRawTestServer(t *testing.T, h http.Handler, configure func(*http.Server)) *httptest.Server {
+	t.Helper()
+
+	srv := httptest.NewUnstartedServer(h)
+	if configure != nil {
+		configure(srv.Config)
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	return srv
+}
 
 // rawRPC issues a single JSON-RPC POST against base and returns the
 // decoded response body (nil for a notification, which has none) along
@@ -336,6 +356,99 @@ func TestPushNotification_WatcherPathWithRealisticDelay_RawClient(t *testing.T) 
 		t.Logf("received on standing GET stream: %s", ev)
 	case <-time.After(5 * time.Second):
 		t.Fatal("no notification arrived for the watcher-path reply, even after a realistic delay before firing")
+	}
+}
+
+// TestPushNotification_DelayedPushSurvivesServerWriteTimeout closes the
+// gap that let board bug 4f93edd4 stay dark: every other test in this
+// file runs against httptest.NewServer, which builds an *http.Server with
+// ZERO timeouts, while production (cmd/rendezvous/main.go newServer) sets
+// WriteTimeout. Go resets that deadline only when a new request's headers
+// are read, so on a standing GET it is a hard cap measured from when the
+// stream opened — not an idle timeout. A push fired after it expires is
+// never delivered and the connection is torn down, while the write
+// reports success to the application: Flush() returns no error, so
+// neither this app nor the SDK can see the failure. Server-side silence,
+// client-side a stream that was open and simply never delivered anything.
+//
+// The WriteTimeout here is scaled down (500ms, trigger at +1.2s) to keep
+// the test fast while preserving the "trigger fires after the deadline"
+// relationship that every live round in 4f93edd4 had.
+func TestPushNotification_DelayedPushSurvivesServerWriteTimeout(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	agentA, err := storage.CreateAgent(db, "agent-a")
+	if err != nil {
+		t.Fatalf("CreateAgent(agent-a) error = %v", err)
+	}
+	agentB, err := storage.CreateAgent(db, "agent-b")
+	if err != nil {
+		t.Fatalf("CreateAgent(agent-b) error = %v", err)
+	}
+	tokenA, err := storage.IssueAgentToken(db, agentA.ID)
+	if err != nil {
+		t.Fatalf("IssueAgentToken(agent-a) error = %v", err)
+	}
+	tokenB, err := storage.IssueAgentToken(db, agentB.ID)
+	if err != nil {
+		t.Fatalf("IssueAgentToken(agent-b) error = %v", err)
+	}
+
+	const writeTimeout = 500 * time.Millisecond
+	srv := newRawTestServer(t, mcpserver.NewHTTPHandler(db), func(s *http.Server) {
+		s.WriteTimeout = writeTimeout
+	})
+
+	sessionB := initializeRawSession(t, srv.URL, tokenB)
+	subResp, _ := rawRPC(t, srv.URL, tokenB, sessionB, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      2,
+		"method":  "resources/subscribe",
+		"params":  map[string]any{"uri": "rendezvous://catchup/" + agentB.ID},
+	})
+	if _, ok := subResp["result"]; !ok {
+		t.Fatalf("resources/subscribe did not succeed: %v", subResp)
+	}
+
+	events, cancel := openStandingStream(t, srv.URL, tokenB, sessionB)
+	defer cancel()
+
+	// Let the server's write deadline for this response expire before
+	// anything is pushed, the way it always had in production.
+	time.Sleep(writeTimeout + 700*time.Millisecond)
+
+	// A second actor must fire the trigger: self-mentions write no row at
+	// insert, so mentioning yourself produces a clean-looking negative
+	// whether or not delivery works.
+	sessionA := initializeRawSession(t, srv.URL, tokenA)
+	callResp, _ := rawRPC(t, srv.URL, tokenA, sessionA, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      3,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name": "create_thread",
+			"arguments": map[string]any{
+				"title": "Delayed push repro",
+				"body":  "cc @agent-b",
+			},
+		},
+	})
+	if _, ok := callResp["result"]; !ok {
+		t.Fatalf("create_thread call did not succeed: %v", callResp)
+	}
+
+	select {
+	case ev, ok := <-events:
+		if !ok {
+			t.Fatal("standing GET stream was closed instead of receiving the push: the server's WriteTimeout is still capping this response")
+		}
+		if !strings.Contains(ev, "notifications/resources/updated") {
+			t.Fatalf("unexpected event on standing GET stream: %s", ev)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no notification arrived on a standing GET stream held past the server's WriteTimeout")
 	}
 }
 

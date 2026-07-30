@@ -164,10 +164,13 @@ func buildAppHandler(ctx context.Context, cmd *cli.Command, db *gorm.DB) (http.H
 // newServer builds the *http.Server this app always serves with,
 // regardless of which startup path constructed handler.
 func newServer(addr string, handler http.Handler) *http.Server {
-	// WriteTimeout is safe for now since catch_up is pull-based and no
-	// server-initiated streaming push channel is built (per the design
-	// doc); if long-lived SSE streaming is added later, this may need to
-	// become per-handler or be removed.
+	// WriteTimeout applies to every route here EXCEPT /mcp, which clears
+	// it per-response in mcpserver.withoutWriteDeadline. It has to: the
+	// MCP transport holds a standing GET open for the life of a session
+	// and writes notifications onto it long after the request arrived,
+	// while WriteTimeout is a cap from when the stream opened rather than
+	// an idle timeout. Anything else long-lived added later needs the same
+	// exemption — the failure mode is silent (see that function).
 	return &http.Server{
 		Addr:              addr,
 		Handler:           handler,
